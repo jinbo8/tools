@@ -3,10 +3,10 @@ import os
 
 def compare_img_label(images, labels, json_value=5):
     """
-    功能： 比较两个文件夹的文件名是否完全一致
+    功能： 比较标签/图片两个文件夹的文件名是否完全一致
     Args:
-        images: 图片文件夹
-        labels: 标签文件夹
+        images: 图片文件夹 .jpg
+        labels: 标签文件夹 .txt
 
     Returns:
 
