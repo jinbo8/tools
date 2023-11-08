@@ -3,6 +3,7 @@ import os
 import shutil
 
 if __name__ == '__main__':
+     """将同一个文件夹的txt/image分开"""
     src_path = '/media/dell/sata4t/jwang/datasets/items_datasets/danger_drive/dangerous2022batch123/images/val2017'
     dst_path = '/media/dell/sata4t/jwang/datasets/items_datasets/danger_drive/dangerous2022batch123/labels/val2017'
 
