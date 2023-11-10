@@ -1,0 +1,71 @@
+import onnx
+import onnx.checker
+import onnx.utils
+from onnx.tools import update_model_dims
+
+# 1.修改模型的输入输出参数
+# 腳本方式將生成的ocr onnx模型输入输出参数修改
+# model = onnx.load('/home/dell/桌面/license_plate_rec/PaddleOCR/pt2infer/model.onnx')
+# # 此处可以理解为获得了一个维度 “引用”，通过该 “引用“可以修改其对应的维度
+# # print(model.graph)
+# dim_proto0 = model.graph.input[0].type.tensor_type.shape.dim[0]
+# dim_proto1 = model.graph.input[0].type.tensor_type.shape.dim[1]
+# dim_proto2 = model.graph.input[0].type.tensor_type.shape.dim[2]
+# dim_proto3 = model.graph.input[0].type.tensor_type.shape.dim[3]
+# # 将该维度赋值为字符串，其维度不再为和dummy_input绑定的值
+# dim_proto0.dim_param = 'batch'
+# dim_proto1.dim_param = '3'
+# dim_proto2.dim_param = '24'
+# dim_proto3.dim_param = '94'
+#
+# dim_out = model.graph.output[0].name
+# dim_proto0 = model.graph.output[0].type.tensor_type.shape.dim[0]
+# dim_proto1 = model.graph.output[0].type.tensor_type.shape.dim[1]
+# dim_proto2 = model.graph.output[0].type.tensor_type.shape.dim[2]
+#
+# # 将该维度赋值为字符串，其维度不再为和dummy_input绑定的值
+# # dim_out = 'output'
+# dim_proto0.dim_param = 'batch'
+# dim_proto1.dim_param = '24'
+# dim_proto2.dim_param = '94'
+#
+# onnx.save(model, "/home/dell/桌面/license_plate_rec/PaddleOCR/pt2infer/ocr.onnx")
+
+
+#
+import onnx
+
+# 2.修改模型的input，output名称
+# 加载模型文件
+model = onnx.load("/home/dell/桌面/license_plate_rec/PaddleOCR/output/rec_ppocr_v3_20230815/ocr_rec.onnx")
+
+# 修改输入输出张量的名称
+idx_start = 0
+for input in model.graph.input:
+    for node in model.graph.node:
+        # 如果当前节点的输入名称与待修改的名称相同，则将其替换为新名称
+        for i, name in enumerate(node.input):
+            if name == input.name:
+                node.input[i] = "input"
+                # node.input[i] = "input_" + str(idx_start)
+    # input.name = "input_" + str(idx_start)
+    input.name = "input"
+    idx_start += 1
+    print(idx_start)
+
+idx_start = 0
+for output in model.graph.output:
+    for node in model.graph.node:
+        # 如果当前节点的输入名称与待修改的名称相同，则将其替换为新名称
+        for i, name in enumerate(node.output):
+            if name == output.name:
+                # node.output[i] = "output_" + str(idx_start)
+                # node.output[i] = "output_" + str(idx_start)
+                node.output[i] = "output"
+    # output.name = "output_" + str(idx_start)
+    output.name = "output"
+    idx_start += 1
+    print(idx_start)
+# 保存修改后的模型
+onnx.save(model, "/home/dell/桌面/license_plate_rec/PaddleOCR/output/rec_ppocr_v3_20230815/ocr_rec-2.onnx")
+
