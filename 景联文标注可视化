@@ -1,0 +1,166 @@
+import json
+import cv2
+import os
+from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+# [
+#   {
+#     "type": "bus",
+#     "box2d": [
+#       1330.67789819399,
+#       633.2070082733725,
+#       1989.239390702254,
+#       1583.4979079628113
+#     ],
+#     "color": "white",
+#     "color2": null,
+#     "plate_box2d": [
+#       1606.288120658511,
+#       1444.5074911030267,
+#       1734.4169683430696,
+#       1488.2523625269619
+#     ],
+#     "plate_corner": [
+#       1607.1190067595196,
+#       1444.8553301689335,
+#       1606.395722886886,
+#       1482.8277334822083,
+#       1731.1621909162175,
+#       1486.4441528453774,
+#       1733.3320425341185,
+#       1451.3648850226377
+#     ],
+#     "plate_name": "桂CK3593",
+#     "plate_color": "yellow",
+#     "plate_layer": "single"
+#   }
+# ]
+
+
+
+def select(json_dir, img_dir, output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    # 可自行修改显示颜色
+    color = {"blue": (255, 0, 0),  # blue
+             "green": (0, 128, 0),  # green
+             "yellow": (0, 204, 255),  # yellow
+             "white": (210, 210, 210),  # white
+             "black": (0, 0, 0),  # black
+             }
+    total_json = os.listdir(json_dir)
+    for i in range(len(total_json)):
+        if total_json[i].endswith("json"):
+
+            # load json label
+            json_path = os.path.join(json_dir, total_json[i])
+            json_file = open(json_path, encoding='utf-8')
+            annos = json.load(json_file)
+            # print(f"annos:{annos}")
+
+            # read image
+            img_path = img_dir + "\\" + total_json[i][:-4] + "jpg"
+            img = cv2.imread(img_path)
+
+            for j in range(len(annos)):
+                print(f" annos[j].keys():{annos[j].keys()}")
+                if "type" in annos[j].keys():
+                    type = annos[j]["type"]
+                if "plate_box2d" in annos[j].keys():
+                    box = annos[j]["plate_box2d"]
+                if "plate_corner" in annos[j].keys():
+                    corner = annos[j]["plate_corner"]
+                if "plate_name" in annos[j].keys():
+                    plate_name = annos[j]["plate_name"]
+                if "plate_color" in annos[j].keys():
+                    plate_color = annos[j]["plate_color"]
+                if "plate_layer" in annos[j].keys():
+                    plate_layer = annos[j]["plate_layer"]
+
+                xmin, ymin, xmax, ymax = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+                cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color[plate_color], thickness=2)  # 画车牌矩形框到图上
+                # 画车牌上方填充框和字符
+                cv2.rectangle(img, (xmin, ymin), (xmin + 350, ymin - 30), color[plate_color], -1, cv2.LINE_AA)
+                info = type  + ' ' + plate_layer + ' ' + plate_name + ' ' + plate_color
+
+                img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # 图像从OpenCV格式转换成PIL格式
+                font = ImageFont.truetype('字体/JDJHCU.ttf', 22)  # 40为字体大小，根据需要调整
+                draw = ImageDraw.Draw(img_pil)
+                draw.text((xmin, ymin - 30), info, font=font)#, fill=(0, 0, 0))
+
+                # 画车牌 corner point 到图上
+                img = cv2.cvtColor(np.asarray(img_pil), cv2.COLOR_RGB2BGR)
+                x1, y1, x2, y2, x3, y3, x4, y4 = int(corner[0]), int(corner[1]), int(corner[2]), int(corner[3]), int(
+                    corner[4]), int(corner[5]), int(corner[6]), int(corner[7])
+                cv2.line(img, (x1, y1), (x2, y2), (60, 20, 220), 2)
+                cv2.line(img, (x2, y2), (x3, y3), (60, 20, 220), 2)
+                cv2.line(img, (x3, y3), (x4, y4), (60, 20, 220), 2)
+                cv2.line(img, (x1, y1), (x4, y4), (60, 20, 220), 2)
+
+            img_output_path = output_dir + "\\" + total_json[i][:-5] + ".jpg"
+            cv2.imwrite(img_output_path, img)
+
+
+if __name__ == "__main__":
+
+
+
+    img_path = r"C:\Users\admin\Desktop\jlw1115\imggua"
+    json_path = r"C:\Users\admin\Desktop\jlw1115\jsongua"
+
+    # 将标签和名称中的中文替换成英文
+    for i in os.listdir(img_path):
+        old_name = os.path.join(img_path,i)
+        if "喷绘车牌" in i:
+            j = i.replace("喷绘车牌", 'penghuichepai')
+            new_name = os.path.join(img_path,j)
+            os.rename(old_name, new_name)
+
+        for i in os.listdir(img_path):
+            old_name = os.path.join(img_path, i)
+            if "挂车" in i:
+                j = i.replace("挂车", 'guache')
+                new_name = os.path.join(img_path, j)
+                os.rename(old_name, new_name)
+        for i in os.listdir(img_path):
+            old_name = os.path.join(img_path, i)
+            if "香港车牌" in i:
+                j = i.replace("香港车牌", 'xianggangchepai')
+                new_name = os.path.join(img_path, j)
+                os.rename(old_name, new_name)
+        for i in os.listdir(img_path):
+            old_name = os.path.join(img_path, i)
+            if "澳门车牌" in i:
+                j = i.replace("澳门车牌", 'aomenchepai')
+                new_name = os.path.join(img_path, j)
+                os.rename(old_name, new_name)
+
+    for i in os.listdir(json_path):
+        old_name = os.path.join(json_path, i)
+        if "喷绘车牌" in i:
+            j = i.replace("喷绘车牌", 'penghuichepai')
+            new_name = os.path.join(json_path, j)
+            os.rename(old_name, new_name)
+
+        for i in os.listdir(json_path):
+            old_name = os.path.join(json_path, i)
+            if "挂车" in i:
+                j = i.replace("挂车", 'guache')
+                new_name = os.path.join(json_path, j)
+                os.rename(old_name, new_name)
+        for i in os.listdir(json_path):
+            old_name = os.path.join(json_path, i)
+            if "香港车牌" in i:
+                j = i.replace("香港车牌", 'xianggangchepai')
+                new_name = os.path.join(json_path, j)
+                os.rename(old_name, new_name)
+        for i in os.listdir(json_path):
+            old_name = os.path.join(json_path, i)
+            if "澳门车牌" in i:
+                j = i.replace("澳门车牌", 'aomenchepai')
+                new_name = os.path.join(json_path, j)
+                os.rename(old_name, new_name)
+
+
+    output_path = img_path + "_res"
+    select(json_path, img_path, output_path)
