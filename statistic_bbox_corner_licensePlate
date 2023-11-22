@@ -1,0 +1,29 @@
+import os
+import json
+
+
+def statistic_bbox_corner(json_dir):
+    """ 统计标注的车牌 车牌bbox个数和角点个数 """
+
+    jsons = os.listdir(json_dir)
+    bbox_number = 0
+    point_number = 0
+
+    for i in jsons:
+        json_path = os.path.join(json_dir, i)
+        json_file = open(json_path)
+        json_datas = json.load(json_file)
+        for data in json_datas:
+            bbox_number += int(len(data['box2d'])/4)
+            point_number += int(len(data['corner'])/2)
+
+    return bbox_number, point_number
+
+
+if __name__ == '__main__':
+    json_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2023带预测结果的送标数据54792/2023label_res2600处理过程记录/大图图片和json标签/labels'
+
+    bbox_number, point_number = statistic_bbox_corner(json_dir)
+
+    print(f"车牌bbox数量  ：{bbox_number }")
+    print(f"车牌points数量：{point_number}，对应多边形数量：{point_number/4}")
