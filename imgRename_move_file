@@ -1,0 +1,116 @@
+import os
+import shutil
+import cv2
+
+
+def file_rename(img_dir):
+    names = os.listdir(img_dir)
+    color = img_dir.split('/')[-1]
+    print(color)
+    for i, name in enumerate(names):
+        j = i+1
+        old_name = os.path.join(img_dir, name)
+        new_img_name = color + '_' + str(j).zfill(8)+name[-4:]
+        new_name = os.path.join(img_dir, new_img_name)
+        print(new_name)
+        os.rename(old_name, new_name)
+
+
+def move_file2dst(src, dst, number=100, pixel=120):
+    """
+    移动一定数量的文件到了另外一个文件夹
+    Args:
+        src:
+        dst:
+        number:
+
+    Returns:
+
+    """
+    names = os.listdir(src)
+    color = src.split('/')[-1]
+    color_dir = os.path.join(dst, color)
+    print(color_dir)
+    if not os.path.exists(color_dir):
+        os.mkdir(color_dir)
+    else:
+        pass
+
+    n = 0
+    for i, name in enumerate(names):
+        old_name = os.path.join(src, name)
+        img_data = cv2.imread(old_name)  # print(img_data.shape)  (height, width, channels)
+        # print(old_name)
+        if img_data.shape[1]>=pixel:
+            n += 1
+            if n < number:
+                print(n, img_data.shape[1])
+                new_name = os.path.join(color_dir, name)
+                shutil.move(old_name, new_name)
+            else:
+                break
+
+
+
+
+def get_lp_size_bt100and120(src, dst, number=120, pixel_small=100, pixel_biggest=120):
+    """
+    移动一定数量的文件到了另外一个文件夹
+    Args:
+        src:
+        dst:
+        number:
+
+    Returns:
+
+    """
+    names = os.listdir(src)
+    color = src.split('/')[-1]
+    color_dir = os.path.join(dst, color)
+    if not os.path.exists(color_dir):
+        os.mkdir(color_dir)
+    else:
+        pass
+
+    n = 0
+    for i, name in enumerate(names):
+        old_name = os.path.join(src, name)
+        img_data = cv2.imread(old_name)  # print(img_data.shape)  (height, width, channels)
+        # print(old_name)
+        if img_data.shape[1]>=pixel_small and img_data.shape[1]<=pixel_biggest:
+            n += 1
+            print(n, img_data.shape[1])
+            if n<number:
+                new_name = os.path.join(color_dir, name)
+                shutil.move(old_name, new_name)
+            else:
+                break
+
+
+if __name__ == '__main__':
+    # 1.标注的图片标签文件重命名
+    img_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/LPcolor/color_lp_merge/black'
+    # file_rename(img_dir)
+
+    # 2.移动一定数量的文件到了另外一个文件夹,车牌颜色识别评估数据集制作
+    for color_name in ['black', 'blue', 'yellow', 'green', 'white', 'green' ]:  # 'black', 'blue', 'yellow', 'green'， 'white'
+        src = os.path.join('/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/LPcolor/color_ccpd_merge', color_name)
+        dst = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/LPcolor/color_ccpd_merge/color_eval_data20231128/gt120'
+        # move_file2dst(src, dst, number=120, pixel=120) #pixel>120
+
+        dst100and120 = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/LPcolor/color_ccpd_merge/color_eval_data20231128/bt100and120'
+        get_lp_size_bt100and120(src, dst100and120, number=50, pixel_small=100, pixel_biggest=120)
+
+    # 将同一个文件夹的txt/image分开
+    src_path = '/media/dell/sata4t/jwang/datasets/items_datasets/danger_drive/dangerous2022batch123/coco/images/train2017'
+    dst_path = '/media/dell/sata4t/jwang/datasets/items_datasets/danger_drive/interload/images2023smoke/train2017'
+
+    names = os.listdir(src_path)
+    lens = len(names)
+    for num, i in enumerate(names):
+        if i.endswith('.jpg'):
+            src_abs = os.path.join(src_path, i)
+            dstc_abs = os.path.join(dst_path, i)
+            shutil.copy(src_abs, dstc_abs)
+            print(f"{num}/{lens-1}")
+
