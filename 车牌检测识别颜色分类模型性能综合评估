@@ -1,0 +1,792 @@
+import os
+import json
+import time
+import numpy as np
+
+
+# color_dict
+# color_dict = {"0":'黑色',"1": '蓝色',"2":'绿色',"3": '白色',"4":'黄色'}
+plate_colors = {'蓝色':'0', '绿色':'1', '白色':'3', '黄色':'2','黑色':'4'}
+
+def calculate_iou(box1, box2):
+    """
+    功能：以中心坐标格式为例计算 标注bbox1 和预测车牌框bbox2之间IOU
+    Args:
+        box1: 标注的标签车牌框bbox左上角/右下角坐标
+        box2: 模型检测到的车牌框bbox左上角/右下角坐标
+    Returns: 两个框的IOU
+
+    """
+    x1, y1, w1, h1 = int(box1[0]),int(box1[1]),int(box1[2]),int(box1[3])
+    x2, y2, w2, h2 = int(box2[0]),int(box2[1]),int(box2[2]),int(box2[3])
+
+    # 计算每个框的上下左右边线的坐标
+    y1_max = y1 + h1 / 2
+    x1_max = x1 + w1 / 2
+    y1_min = y1 - h1 / 2
+    x1_min = x1 - w1 / 2
+
+    y2_max = y2 + h2 / 2
+    x2_max = x2 + w2 / 2
+    y2_min = y2 - h2 / 2
+    x2_min = x2 - w2 / 2
+
+    # 上取小下取大，右取小左取大
+    xx1 = np.max([x1_min, x2_min])
+    yy1 = np.max([y1_min, y2_min])
+    xx2 = np.min([x1_max, x2_max])
+    yy2 = np.min([y1_max, y2_max])
+
+    # 计算各个框的面积
+    area1 = (x1_max - x1_min) * (y1_max - y1_min)
+    area2 = (x2_max - x2_min) * (y2_max - y2_min)
+
+    # 计算相交的面积
+    inter_area = (np.max([0, xx2 - xx1])) * (np.max([0, yy2 - yy1]))
+    # 计算IoU
+    iou = inter_area / (area1 + area2 - inter_area)
+    return iou
+
+
+def get_mark_label(label_path, tiny_value=100, large_value=120, cls_with_null=True):
+    """ 功能：获取标注的车牌框坐标、车牌字符串、车牌层数、车牌颜色 """
+
+    # (1)标注的所有数据
+    all_label_bbox = []
+    all_label_char = []
+    all_label_cls = []
+    all_label_color = []
+
+    # (2)标注框bbox检测 acc 与 recall 计算
+    # box
+    gt120_bbox_label_list = []
+    bt100and120_bbox_label_list = []
+    # char
+    gt120_char_label_list = []
+    bt100and120_char_label_list = []
+    # char非空的box
+    no_empty_gt120_bbox_label_list = []
+    no_empty_bt100and120_bbox_label_list = []
+
+    # (3) color
+    # color-box
+    all_color_label_list = []
+    gt120_color_label_list = []
+    bt100and120_color_label_list = []
+    # color-value
+    all_color_label_value_list = []
+    gt120_color_label_value_list = []
+    bt100and120_color_label_value_list = []
+
+    # (4) layer
+    # layer-box
+    cls_label_bbox_list_all = []
+    gt120_cls_label_bbox_list = []
+    bt100and120_cls_label_bbox_list = []
+    # layer-value
+    cls_label_value_list_all = []
+    gt120_cls_label_value_list = []
+    bt100and120_cls_label_value_list = []
+
+    # 打开单个标注文件，文件格式为json
+    with open(label_path, 'r', encoding='utf-8') as label_file:
+        label_datas = json.load(label_file)
+        if len(label_datas) != 0:                    # 获取标注非空的车牌信息
+            for label_data in label_datas:           # 遍历标注的标签
+                label_box2d = label_data["box2d"]    # 统计标注2D框
+                # print(f"label_box2d:{label_box2d}")
+                # 车牌宽度width计算
+                lp_bbox_width = int(label_box2d[2]) - int(label_box2d[0])
+                # (1-1)标注的车牌信息写入到list
+                if len(label_box2d) == 4:
+                    all_label_bbox.append(label_box2d)
+                    all_label_char.append(label_data['plate_number'])
+                    all_label_cls.append(label_data['plate_layer'])
+                    all_label_color.append(label_data['plate_color'])
+
+
+                # ----------------------------bbox and char---------------------
+                # (2-1) 国标尺寸的车牌框添加到list;[tiny_value, large_value),[large_value,++)
+                if len(label_box2d) == 4:
+                    if lp_bbox_width >= tiny_value and lp_bbox_width < large_value:
+                        bt100and120_bbox_label_list.append(label_box2d)
+                    if lp_bbox_width >= large_value:
+                        gt120_bbox_label_list.append(label_box2d)
+
+                # (2-2) 字符非且符合国标的车牌char加入到list
+                lp_char = label_data['plate_number']
+                if (lp_char != 'null') and (lp_bbox_width >= tiny_value and lp_bbox_width < large_value):
+                    bt100and120_char_label_list.append(lp_char)
+                    no_empty_bt100and120_bbox_label_list.append(label_box2d)
+                if (lp_char != 'null') and (lp_bbox_width >= large_value): #【120，++）
+                    no_empty_gt120_bbox_label_list.append(label_box2d)
+                    gt120_char_label_list.append(lp_char)
+
+                # -----------------------------color---------------------------
+                # color 字段非空和对应bbox加入到list, total
+                plate_color_value = label_data['plate_color']
+                if plate_color_value != 'null':
+                    gt_time_value1 = time.time()
+                    value = plate_color_value + '_' + str(gt_time_value1)
+                    all_color_label_list.append(label_box2d)
+                    all_color_label_value_list.append(value)
+                # color 字段非空和对应bbox加入到list, [100,120)
+                if (lp_bbox_width >= tiny_value and lp_bbox_width < large_value) and (plate_color_value != 'null'):
+                    gt_time_value2 = time.time()
+                    value2 = plate_color_value + '_' + str(gt_time_value2)
+                    bt100and120_color_label_list.append(label_box2d)
+                    bt100and120_color_label_value_list.append(value2)
+                # color 字段非空和对应bbox加入到list, [120,++)
+                if (lp_bbox_width >= large_value) and (plate_color_value != 'null'):
+                    gt_time_value1 = time.time()
+                    value1 = plate_color_value + '_' + str(gt_time_value1)
+                    gt120_color_label_list.append(label_box2d)
+                    gt120_color_label_value_list.append(value1)
+
+                # ---------------------------- layer ------------------------
+                plate_layer_value = label_data['plate_layer']
+                cls_with_null = True
+                if cls_with_null:
+                    # （a）包含null的标签路径
+                    if len(label_box2d) == 4:
+                        # layer字段和对应bbox加入到list, total
+                        gt_time_value1 = time.time()
+                        value1 = plate_layer_value + '_' + str(gt_time_value1)
+                        cls_label_value_list_all.append(value1)
+                        cls_label_bbox_list_all.append(label_box2d)
+                        # layer 字段非空和对应bbox加入到list, [100,120)
+                        if lp_bbox_width >= tiny_value and lp_bbox_width < large_value:
+                            gt_time_value2 = time.time()
+                            value2 = plate_layer_value + '_' + str(gt_time_value2)
+                            bt100and120_cls_label_value_list.append(value2)
+                            bt100and120_cls_label_bbox_list.append(label_box2d)
+                        # layer 字段非空和对应bbox加入到list, [120,++)
+                        if lp_bbox_width >= large_value:
+                            gt_time_value1 = time.time()
+                            value1 = plate_layer_value + '_' + str(gt_time_value1)
+                            gt120_cls_label_value_list.append(value1)
+                            gt120_cls_label_bbox_list.append(label_box2d)
+                else:
+                    # (b) 不包含null的标签路径
+                    # layer字段和对应bbox加入到list, total
+                    if len(label_box2d) == 4 and (plate_layer_value != 'null'):
+                        gt_time_value1 = time.time()
+                        value1 = plate_layer_value + '_' + str(gt_time_value1)
+                        cls_label_value_list_all.append(value1)
+                        cls_label_bbox_list_all.append(label_box2d)
+                    # layer 字段非空和对应bbox加入到list, [100,120)
+                    if (lp_bbox_width >= tiny_value and lp_bbox_width < large_value) and (plate_layer_value != 'null'):
+                        gt_time_value2 = time.time()
+                        value2 = plate_layer_value + '_' + str(gt_time_value2)
+                        bt100and120_cls_label_value_list.append(value2)
+                        bt100and120_cls_label_bbox_list.append(label_box2d)
+                    # layer 字段非空和对应bbox加入到list, [120,++)
+                    if (lp_bbox_width >= large_value) and (plate_layer_value != 'null'):
+                        gt_time_value1 = time.time()
+                        value1 = plate_layer_value + '_' + str(gt_time_value1)
+                        gt120_cls_label_value_list.append(value1)
+                        gt120_cls_label_bbox_list.append(label_box2d)
+
+    return cls_label_value_list_all, cls_label_bbox_list_all, all_color_label_list, all_color_label_value_list, all_label_bbox, all_label_char, all_label_cls, all_label_color, gt120_bbox_label_list, bt100and120_bbox_label_list, gt120_char_label_list, bt100and120_char_label_list, no_empty_gt120_bbox_label_list, no_empty_bt100and120_bbox_label_list,gt120_color_label_list, gt120_color_label_value_list, bt100and120_color_label_list, bt100and120_color_label_value_list, gt120_cls_label_value_list, gt120_cls_label_bbox_list, bt100and120_cls_label_value_list, bt100and120_cls_label_bbox_list
+
+
+def get_predict_result(pred_path, char_len_thred=1, tiny_value=100, large_value=120):
+    """ 功能：获取预测：车牌框坐标、车牌字符串、车牌层数、车牌颜色 """
+
+    # (1)预测的所有数据
+    all_pred_box2d = []
+    all_pred_char = []
+    all_pred_color = []
+    all_pred_cls = []
+
+    # (2)预测框bbox acc 与 recall 计算
+    # box
+    gt120_bbox_pred_list = []
+    bt100_120_bbox_pred_list = []
+    # char
+    gt120_char_pred_list = []
+    bt100and120_char_pred_list = []
+    # char非空box
+    no_empty_gt120_bbox_pred_list = []
+    no_empty_bt100and120_bbox_pred_list = []
+
+    # (3) color
+    # color-box
+    all_color_pred_list = []
+    gt120_color_pred_list = []
+    bt100and120_color_pred_list = []
+    # color-value
+    all_color_pred_value_list = []
+    gt120_color_pred_value_list = []
+    bt100and120_color_pred_value_list = []
+
+    # (4) layer
+    # layer-box
+    cls_pred_bbox_list_all = []
+    gt120_cls_pred_bbox_list = []
+    bt100and120_cls_pred_bbox_list = []
+    # layer-value
+    cls_pred_value_list_all = []
+    gt120_cls_pred_value_list = []
+    bt100and120_cls_pred_value_list = []
+
+    # 打开单张图片的预测结果文件，文件格式为json
+    with open(pred_path, 'r', encoding='utf-8') as pred_file:
+        pred_data = json.load(pred_file)
+        if len(pred_data) != 0:            # 获取预测的非空车牌信息
+            for lp in pred_data.values():  # 遍历预测的非空车牌信息
+                pred_box2d = lp['box']     # 统计预测的2D框
+                # (1-1)预测的车牌信息写入到list
+                if len(pred_box2d) == 4:
+                    all_pred_box2d.append(pred_box2d)
+                    all_pred_char.append(lp['plate_char'])
+                    all_pred_cls.append(lp['plate_layer'])
+                    all_pred_color.append(lp['plate_color'])
+
+                # ----------------------------bbox and char----------------
+                # (2-1)预测车牌bbox信息写入到list
+                lp_bbox_width = int(pred_box2d[2]) - int(pred_box2d[0])  # 计算车牌宽度
+                if (lp_bbox_width >= tiny_value) and (lp_bbox_width < large_value):
+                    bt100_120_bbox_pred_list.append(pred_box2d)
+                if lp_bbox_width >= large_value:
+                    gt120_bbox_pred_list.append(pred_box2d)
+
+                # (2-2) 字符非且符合国标的车牌char加入到list
+                if (len(lp['plate_char']) > 0) and (lp_bbox_width >= tiny_value and lp_bbox_width < large_value):
+                    bt100and120_char_pred_list.append(lp['plate_char'])
+                    no_empty_bt100and120_bbox_pred_list.append(pred_box2d)
+                if (len(lp['plate_char']) > 0) and (lp_bbox_width >= large_value):
+                    gt120_char_pred_list.append(lp['plate_char'])
+                    no_empty_gt120_bbox_pred_list.append(pred_box2d)
+
+                # -----------------------------color-------------------
+                # color 字段非空和对应bbox加入到list, total
+                plate_color_value = lp['plate_color']
+                if plate_color_value != 'null':
+                    gt_time_value1 = time.time()
+                    value = plate_color_value + '_' + str(gt_time_value1)
+                    all_color_pred_list.append(pred_box2d)
+                    all_color_pred_value_list.append(value)
+                # color 字段非空和对应bbox加入到list, [100,120)
+                if (lp_bbox_width >= tiny_value and lp_bbox_width < large_value) and (plate_color_value != 'null'):
+                    bt_time_value = time.time()
+                    value2 = plate_color_value + '_' + str(bt_time_value)
+                    bt100and120_color_pred_list.append(pred_box2d)
+                    bt100and120_color_pred_value_list.append(value2)
+                # color 字段非空和对应bbox加入到list, [120,++)
+                if (lp_bbox_width >= large_value) and (plate_color_value != 'null'):
+                    gt_time_value = time.time()
+                    value1 = plate_color_value + '_' + str(gt_time_value)
+                    gt120_color_pred_list.append(pred_box2d)
+                    gt120_color_pred_value_list.append(value1)
+
+                # ---------------------------- layer --------------------
+                plate_layer_value = lp['plate_layer']
+                # layer字段和对应bbox加入到list, total
+                if (plate_layer_value != 'null') and (len(pred_box2d) == 4):
+                    gt_time_value1 = time.time()
+                    cls_value = str(plate_layer_value) + '_' + str(gt_time_value1)
+                    cls_pred_value_list_all.append(cls_value)
+                    cls_pred_bbox_list_all.append(pred_box2d)
+                # layer 字段非空和对应bbox加入到list, [100,120)
+                if (lp_bbox_width >= tiny_value and lp_bbox_width < large_value) and (plate_layer_value != 'null'):
+                    gt_time_value2 = time.time()
+                    value2 = str(plate_layer_value) + '_' + str(gt_time_value2)
+                    bt100and120_cls_pred_value_list.append(value2)
+                    bt100and120_cls_pred_bbox_list.append(pred_box2d)
+                # layer 字段非空和对应bbox加入到list, [120,++)
+                if (lp_bbox_width >= large_value) and (plate_layer_value != 'null'):
+                    gt_time_value1 = time.time()
+                    value1 = str(plate_layer_value) + '_' + str(gt_time_value1)
+                    gt120_cls_pred_value_list.append(value1)
+                    gt120_cls_pred_bbox_list.append(pred_box2d)
+
+    return cls_pred_value_list_all, cls_pred_bbox_list_all, all_color_pred_list,  all_color_pred_value_list, all_pred_box2d,all_pred_char,all_pred_cls,all_pred_color,gt120_bbox_pred_list, bt100_120_bbox_pred_list, gt120_char_pred_list, bt100and120_char_pred_list,no_empty_gt120_bbox_pred_list, no_empty_bt100and120_bbox_pred_list,gt120_color_pred_list, gt120_color_pred_value_list, bt100and120_color_pred_list, bt100and120_color_pred_value_list, gt120_cls_pred_value_list, gt120_cls_pred_bbox_list, bt100and120_cls_pred_value_list, bt100and120_cls_pred_bbox_list
+
+
+def calculate_bbox_det_acc_reacall_standard(label_dir, pred_dir, pred_iou_thred=0.5, char_len_thred=7, tiny_value=100, large_value=120, bbox_over_threshold=0):
+    label_jsons = os.listdir(label_dir)
+    #-----------bbox----------
+    # 车牌bbox：标注标签
+    all_label_bbox_list_total = 0              # 标注框总量
+    bt100and120_label_list_total = 0           # [100,120) 标注框总量
+    gt120_label_list_total = 0                 # [120，++) 标注框总量
+    # 车牌bbox： 预测： recall计算
+    gt120_bbox_pred_recall_right = 0
+    bt100and120_bbox_pred_recall_right = 0
+
+    # 车牌bbox：预测, acc计算
+    all_pred_box2d_total = 0
+    bt100_120_bbox_pred_list_total = 0
+    gt120_bbox_pred_list_total = 0
+
+    gt120_bbox_pred_right = 0
+    bt100and120_pred_right = 0
+
+    # ----------char-----------
+    # char: acc
+    # label
+    bt100and120_char_labels_all = 0
+    gt120_char_labels_all = 0
+
+    # recall 计算
+    gt120_char_label_recall_right_all = 0
+    bt100and120_char_label_recall_right_all = 0
+
+    gt120_char_pred_all = 0
+    gt120_char_pred_right_all = 0
+
+    bt100and120_char_pred_all = 0
+    bt100and120_char_pred_right_all = 0
+
+    # ------------ bbox and char all right-----
+    gt120_pred_ocrANDbbox_all_right = 0                # acc
+    bt100and120_pred_ocrANDbbox_all_right = 0          # acc
+    gt120_label_ocrANDbbox_all_right_recall = 0        # recall
+    bt100and120_label_ocrANDbbox_all_right_recall = 0  # recall
+
+    no_empty_gt120_bbox_label_list_all = 0
+    no_empty_bt100and120_bbox_label_list_all = 0
+    no_empty_gt120_bbox_pred_list_all = 0
+    no_empty_bt100and120_bbox_pred_list_all = 0
+
+    # -----------------color------------------
+    # label
+    all_color_label_num = 0
+    gt120_color_label_all = 0
+    bt100and120_color_label_all = 0
+    gt120_color_label_right_recall = 0  # recall
+
+    # predict
+    all_color_pred_num = 0
+    gt120_color_pred_all = 0
+    gt120_color_pred_right = 0
+
+    bt100and120_color_pred_all = 0
+    bt100and120_color_pred_right = 0
+    bt100and120_color_pred_right_recall = 0  # recall
+
+    # ------------------layer ---------------
+
+    cls_label_value_list_all_num = 0
+    # label
+    gt120_cls_label_value_list_total = 0
+    bt100and120_cls_label_value_list_total = 0
+    gt120_cls_label_right_recall = 0        # recall
+    bt100and120_cls_label_right_recall = 0  # recall
+    # predict
+    cls_pred_value_list_all_num = 0
+    gt120_cls_pred_value_list_all = 0
+    gt120_cls_pred_right = 0
+    bt100and120_cls_pred_value_list_all = 0
+    bt100and120_cls_pred_right = 0
+
+    #----------------bbox over compute -------
+    pred_gt_120_bbox_over = 0
+    pred_bt100120_bbox_over = 0
+
+    # 开始计算
+    for label_json in label_jsons:
+        label_path = os.path.join(label_dir, label_json)
+        pred_path = os.path.join(pred_dir, label_json)
+        # -------------------------------------标注标签 ------------------------------------------
+        # 真实标签
+        cls_label_value_list_all, cls_label_bbox_list_all, all_color_label_list, all_color_label_value_list, all_label_bbox_list, all_label_char_list, all_label_cls_list, all_label_color_list, gt120_label_list_frame, bt100and120_label_list_frame, gt120_char_label_list, bt100and120_char_label_list, no_empty_gt120_bbox_label_list, no_empty_bt100and120_bbox_label_list, gt120_color_label_list, gt120_color_label_value_list, bt100and120_color_label_list, bt100and120_color_label_value_list,\
+            gt120_cls_label_value_list, gt120_cls_label_bbox_list, bt100and120_cls_label_value_list, bt100and120_cls_label_bbox_list = get_mark_label(label_path)
+        # ---------bbox and char:
+        # (1)统计标注的bbox标签数量
+        all_label_bbox_list_total += len(all_label_bbox_list)              # 标注框总量
+        bt100and120_label_list_total += len(bt100and120_label_list_frame)  # [100,120) 标注框总量
+        gt120_label_list_total += len(gt120_label_list_frame)              # [120，++) 标注框总量
+
+        # (2)统计标注的char标签数量
+        gt120_char_labels_all += len(gt120_char_label_list)               # [120，++) 标注char总量
+        bt100and120_char_labels_all += len(bt100and120_char_label_list)   # [100,120) 标注char总量
+
+        # char 非空的bbox label
+        no_empty_gt120_bbox_label_list_all += len(no_empty_gt120_bbox_label_list)              # [120，++) 标注char非空数量
+        no_empty_bt100and120_bbox_label_list_all += len(no_empty_bt100and120_bbox_label_list)  # [100，120) 标注char非空数量
+
+
+        # ----------- color :
+        # (3)统计标注的color标签数量
+        all_color_label_num += len(all_color_label_list)                  # 标注color总量
+        gt120_color_label_all += len(gt120_color_label_value_list)        # [120，++) 标注color总量
+        bt100and120_color_label_all += len(bt100and120_color_label_value_list)  # [100,120) 标注color总量
+
+        # ------------ layer :
+        # (4)统计标注的layer标签数量
+        cls_label_value_list_all_num += len(cls_label_value_list_all)  # 标注layer总量
+        gt120_cls_label_value_list_total += len(gt120_cls_label_value_list)
+        bt100and120_cls_label_value_list_total += len(bt100and120_cls_label_value_list)
+
+        # -------------------------------------预测值 ------------------------------------------
+        cls_pred_value_list_all, cls_pred_bbox_list_all, all_color_pred_list,  all_color_pred_value_list, all_pred_box2d_list, all_pred_char_list, all_pred_cls_list, all_pred_color_list, gt120_bbox_pred_list_frame, bt100_120_bbox_pred_list_frame, gt120_char_pred_list, bt100and120_char_pred_list, no_empty_gt120_bbox_pred_list, no_empty_bt100and120_bbox_pred_list, gt120_color_pred_list, gt120_color_pred_value_list, bt100and120_color_pred_list, bt100and120_color_pred_value_list, gt120_cls_pred_value_list,\
+            gt120_cls_pred_bbox_list, bt100and120_cls_pred_value_list, bt100and120_cls_pred_bbox_list = get_predict_result(pred_path, char_len_thred=char_len_thred)
+
+        # ---------bbox and char:
+        # (1)统计预测bbox标签数量
+        all_pred_box2d_total += len(all_pred_box2d_list)                       # 预测框总量
+        gt120_bbox_pred_list_total += len(gt120_bbox_pred_list_frame)          # [120，++) 预测框总量
+        bt100_120_bbox_pred_list_total += len(bt100_120_bbox_pred_list_frame)  # [100,120) 预测框总量
+        # (2)统计预测char数量
+        gt120_char_pred_all += len(gt120_char_pred_list)                 # [120，++) 预测char总量
+        bt100and120_char_pred_all += len(bt100and120_char_pred_list)     # [100,120) 预测char总量
+
+        # predict：char为非空bbox数量：
+        no_empty_gt120_bbox_pred_list_all += len(no_empty_gt120_bbox_pred_list)                 # [120，++) 预测char非空数量
+        no_empty_bt100and120_bbox_pred_list_all += len(no_empty_bt100and120_bbox_pred_list)     # [100，120) 预测char非空数量
+
+        # ------------- color:
+        # (3)统计预测的color标签数量
+        all_color_pred_num += len(all_color_pred_list)                        # 预测color总量
+        gt120_color_pred_all += len(gt120_color_pred_value_list)              # [120，++) 预测color总量
+        bt100and120_color_pred_all += len(bt100and120_color_pred_value_list)  # [100,120) 预测color总量
+
+        # ------------layer:
+        # (4)统计预测layer标签数量
+        cls_pred_value_list_all_num += len(cls_pred_value_list_all)                 # 预测layer总量
+        gt120_cls_pred_value_list_all += len(gt120_cls_pred_value_list)             # [120，++) 预测layer总量
+        bt100and120_cls_pred_value_list_all += len(bt100and120_cls_pred_value_list) # [100,120) 预测layer总量
+
+        """ ---------------------(1）计算预测重叠框数------------------------------"""
+        threshold = bbox_over_threshold
+        gt120_bbox_leng = len(gt120_bbox_pred_list_frame)
+        if gt120_bbox_leng > 1:
+            for i, v1 in enumerate(gt120_bbox_pred_list_frame):
+                if (i + 1) < gt120_bbox_leng:
+                    for j in range(i + 1, gt120_bbox_leng):
+                        v2 = gt120_bbox_pred_list_frame[j]
+                        v12_iou = calculate_iou(v1, v2)
+                        if v12_iou > threshold:
+                            pred_gt_120_bbox_over += 1  # 计算车牌框预测正确数量
+
+        bt1000120_bbox_leng = len(bt100_120_bbox_pred_list_frame)
+        if bt1000120_bbox_leng > 1:
+            for i, v1 in enumerate(bt100_120_bbox_pred_list_frame):
+                if (i + 1) < bt1000120_bbox_leng:
+                    for j in range(i + 1, bt1000120_bbox_leng):
+                        v2 = bt100_120_bbox_pred_list_frame[j]
+                        v12_iou = calculate_iou(v1, v2)
+                        if v12_iou > threshold:
+                            pred_bt100120_bbox_over += 1
+        """ ------------------------（2）计算bbox acc recall--------------------"""
+        # 1-1. bbox 准确率计算
+        # 【120，++)  计算尺寸【120，++】的车牌检测准确数量
+        if len(all_label_bbox_list) != 0 and len(gt120_bbox_pred_list_frame) != 0:
+            for box1 in gt120_bbox_pred_list_frame:
+                lp_bbox_width = int(box1[2]) - int(box1[0])  # 计算车牌宽度
+                if lp_bbox_width >= large_value:
+                    for box2 in all_label_bbox_list:
+                        iou = calculate_iou(box1, box2)
+                        if iou > pred_iou_thred:
+                            gt120_bbox_pred_right += 1
+
+        # 【100，120）：计算尺寸【100，120）车牌框预测正确数量
+        if len(all_label_bbox_list) != 0 and len(bt100_120_bbox_pred_list_frame) != 0:
+            for box1 in bt100_120_bbox_pred_list_frame:
+                lp_bbox_width = int(box1[2]) - int(box1[0])  # 计算车牌宽度
+                if lp_bbox_width >= tiny_value and lp_bbox_width < large_value:
+                    for box2 in all_label_bbox_list:
+                        iou = calculate_iou(box1, box2)
+                        if iou > pred_iou_thred:
+                            bt100and120_pred_right += 1
+
+        # 1-2. bbox 召回率率计算
+        # 【120，++)  当标签和预测得到的2D bbox都不为空时，计算标注的尺寸【120，++】车牌标签召回数量
+        if len(gt120_label_list_frame) != 0 and len(gt120_bbox_pred_list_frame) != 0:
+            for box1 in gt120_label_list_frame:
+                lp_bbox_width = int(box1[2]) - int(box1[0])  # 计算车牌宽度
+                if lp_bbox_width >= 120:
+                    for box2 in gt120_bbox_pred_list_frame:
+                        iou = calculate_iou(box1, box2)
+                        if iou > pred_iou_thred:
+                            gt120_bbox_pred_recall_right += 1  # 计算车牌框预测正确数量
+
+        # 【100，120）：【120，++)  当标签和预测得到的2D bbox都不为空时，计算标注的尺寸【100，120）车牌标签召回数量
+        if len(bt100and120_label_list_frame) != 0 and len(bt100and120_label_list_frame) != 0:
+            for box1 in bt100and120_label_list_frame:
+                lp_bbox_width = int(box1[2]) - int(box1[0])    # 计算车牌宽度
+                if lp_bbox_width >= tiny_value and lp_bbox_width < large_value:
+                    for box2 in bt100and120_label_list_frame:
+                        iou = calculate_iou(box1, box2)
+                        if iou > pred_iou_thred:
+                            bt100and120_bbox_pred_recall_right += 1
+
+        """ --------------------（3）计算char acc recal --------------------------- """
+        # 3-1. char 准确率计算
+        # 【120，++) : 计算尺寸【120，++)的车牌char识别准确数量
+        gt120_char_pred_right_frame = 0
+        if len(all_label_char_list) != 0 and len(gt120_char_pred_list) != 0:
+            for pred_char in gt120_char_pred_list:
+                for gt_char in all_label_char_list:
+                    if gt_char == pred_char:
+                        gt120_char_pred_right_frame += 1
+        gt120_char_pred_right_all += gt120_char_pred_right_frame
+
+        # 【100，120）:计算尺寸【100，120)的车牌char识别准确数量
+        bt100and120_char_pred_right_frame = 0
+        if len(all_label_char_list) != 0 and len(bt100and120_char_pred_list) != 0:
+            for bt100and120_pred_char in bt100and120_char_pred_list:
+                for bt100and120_label_char in all_label_char_list:
+                    if bt100and120_label_char == bt100and120_pred_char:
+                        bt100and120_char_pred_right_frame += 1
+        bt100and120_char_pred_right_all += bt100and120_char_pred_right_frame
+
+        # 3-2 char recall 计算
+        # 【120，++) : 计算尺寸【120，++)的车牌char标签召回数量
+        gt120_char_label_recall_frame = 0
+        if len(gt120_char_label_list) != 0 and len(all_pred_char_list) != 0:
+            for gt_char in gt120_char_label_list:
+                for pred_char in all_pred_char_list:
+                    if gt_char == pred_char:
+                        gt120_char_label_recall_frame += 1
+        gt120_char_label_recall_right_all += gt120_char_label_recall_frame
+
+        # 【100，120） : 计算尺寸【100，120)的车牌char标签召回数量
+        bt100and120_char_label_right_frame = 0
+        if len(bt100and120_char_label_list) != 0 and len(all_pred_char_list) != 0:
+            for bt100and120_label_char in bt100and120_char_label_list:
+                for bt100and120_pred_char in all_pred_char_list:
+                    if bt100and120_label_char == bt100and120_pred_char:
+                        bt100and120_char_label_right_frame += 1
+        bt100and120_char_label_recall_right_all += bt100and120_char_label_right_frame
+
+        """ ------------------- (4) bbox char(非空) 准确率和召回率计算  -----------------"""
+        # label all
+        label_dict_all = {}
+        for k, v in zip(all_label_char_list, all_label_bbox_list):
+            label_dict_all[k] = v
+        # predict all
+        pred_dict_all = {}
+        for kp, vp in zip(all_pred_char_list, all_pred_box2d_list):
+            pred_dict_all[kp] = vp
+        # (a) gt120
+        # gt120:label, 字符串非空的标注bbox
+        label_dict = {}
+        for k, v in zip(gt120_char_label_list, no_empty_gt120_bbox_label_list):
+            label_dict[k] = v
+
+        # gt120:pred, 字符串非空的预测bbox
+        pred_dict = {}
+        for kp, vp in zip(gt120_char_pred_list, no_empty_gt120_bbox_pred_list):
+            pred_dict[kp] = vp
+
+        # gt120:准确率计算
+        for prd_char, prd_bbox in pred_dict.items():             # 遍历预测保存结果
+            for lb_char, lb_bbox in label_dict_all.items():      # 遍历标注标签
+
+                gt120_iou = calculate_iou(lb_bbox, prd_bbox)    # box1: 标注车牌框bbox坐标标签
+                if (gt120_iou > pred_iou_thred) and (lb_char == prd_char):
+                    gt120_pred_ocrANDbbox_all_right += 1
+
+        # gt120:召回率计算
+        for lb_char, lb_bbox in label_dict.items():           # 遍历标注标签
+            for prd_char, prd_bbox in pred_dict_all.items():  # 遍历预测保存结果
+                gt120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if (gt120_iou > pred_iou_thred) and (lb_char == prd_char):
+                    gt120_label_ocrANDbbox_all_right_recall += 1
+        # (b)bt100120:
+        # bt100120:label, 字符串非空的标注bbox
+        label_dict1 = {}
+        for k, v in zip(bt100and120_char_label_list, no_empty_bt100and120_bbox_label_list):
+            label_dict1[k] = v
+
+        # bt100120:predict， 字符串非空的预测bbox
+        pred_dict1 = {}
+        for kp, vp in zip(bt100and120_char_pred_list, no_empty_bt100and120_bbox_pred_list):
+            pred_dict1[kp] = vp
+        # bt100120: 准确率计算
+        for prd_char, prd_bbox in pred_dict1.items():
+            for lb_char, lb_bbox in label_dict_all.items():         # 遍历标注标签
+                bt100and120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if (bt100and120_iou > pred_iou_thred) and (lb_char == prd_char):
+                    bt100and120_pred_ocrANDbbox_all_right += 1
+        # bt100120: 召回率计算
+        for lb_char, lb_bbox in label_dict1.items():                # 遍历标注标签
+            for prd_char, prd_bbox in pred_dict_all.items():        # 遍历预测保存结果
+                bt100and120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if (bt100and120_iou > pred_iou_thred) and (lb_char == prd_char):
+                    bt100and120_label_ocrANDbbox_all_right_recall += 1
+
+        """------------------------ (5) bbox color 准确率/召回率计算  ---------------------------"""
+        # label color all： 标签：color：0 1 2 ‘null’
+        label_color_dict_all = {}  #  0 1 2 null
+        for k, v in zip(all_color_label_value_list, all_color_label_list):
+            label_color_dict_all[k] = v
+
+        # pred color all 预测： 蓝色 绿色...中文
+        pred_color_dict_all = {}
+        for kp, vp in zip(all_color_pred_value_list, all_pred_box2d_list):
+            pred_color_dict_all[kp] = vp
+        # (a)gt120:
+        # gt120： label
+        color_label_dict = {}
+        for k, v in zip(gt120_color_label_value_list, gt120_color_label_list):
+            color_label_dict[k] = v
+        # gt120： pred
+        color_pred_dict = {}
+        for kp, vp in zip(gt120_color_pred_value_list, gt120_color_pred_list):
+            color_pred_dict[kp] = vp
+
+        # gt120： acc
+        for prd_char, prd_bbox in color_pred_dict.items():         # 遍历预测保存结果
+            for lb_char, lb_bbox in label_color_dict_all.items():  # 遍历标注标签
+                gt120_iou = calculate_iou(lb_bbox, prd_bbox)       # box1: 标注车牌框bbox坐标标签
+                if (gt120_iou > pred_iou_thred) and (lb_char.split('_')[0] == plate_colors[prd_char.split('_')[0]]):
+                    gt120_color_pred_right += 1
+        # gt120：recall
+        for lb_char, lb_bbox in color_label_dict.items():           # 遍历标注标签
+            for prd_char, prd_bbox in pred_color_dict_all.items():  # 遍历预测保存结果
+                gt120_iou = calculate_iou(lb_bbox, prd_bbox)        # box1: 标注车牌框bbox坐标标签
+                if (gt120_iou > pred_iou_thred) and (lb_char.split('_')[0] == plate_colors[prd_char.split('_')[0]]):
+                    gt120_color_label_right_recall += 1
+        # (b)bt100120:
+        # [100，120）bbox ocr all right
+        # bt100120:label
+        color_100_120_label_dict = {}
+        for k, v in zip(bt100and120_color_label_value_list, bt100and120_color_label_list):
+            color_100_120_label_dict[k] = v
+        # bt100120:predict
+        color_100_120_pred_dict = {}
+        for kp, vp in zip(bt100and120_color_pred_value_list, bt100and120_color_pred_list):
+            color_100_120_pred_dict[kp] = vp
+        # bt100120: acc
+        for prd_char, prd_bbox in color_100_120_pred_dict.items():  # 遍历预测保存结果
+            for lb_char, lb_bbox in label_color_dict_all.items():   # 遍历标注标签
+                bt100and120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if bt100and120_iou > pred_iou_thred:
+                    if lb_char.split('_')[0] == plate_colors[prd_char.split('_')[0]]:
+                        bt100and120_color_pred_right += 1
+        # bt100120: recall
+        for lb_char, lb_bbox in color_100_120_label_dict.items():   # 遍历标注标签
+            for prd_char, prd_bbox in pred_color_dict_all.items():  # 遍历预测保存结果
+                bt100and120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if bt100and120_iou > pred_iou_thred:
+                    if lb_char.split('_')[0] == plate_colors[prd_char.split('_')[0]]:
+                        bt100and120_color_pred_right_recall += 1
+
+        """-------------------  (5) bbox layer 准确率/召回率计算      ------------------------"""
+        # layer: label all
+        cls_label_dict_all = {}
+        for k, v in zip(cls_label_value_list_all, cls_label_bbox_list_all):
+            cls_label_dict_all[k] = v
+        # layer: predict all
+        cls_pred_dict_all = {}
+        for k, v in zip(cls_pred_value_list_all, cls_pred_bbox_list_all):
+            cls_pred_dict_all[k] = v
+        # (a)gt120:
+        # layer [120，++）layer label not empty
+        cls_gt120_label_dict = {}
+        for k, v in zip(gt120_cls_label_value_list, gt120_cls_label_bbox_list):
+            cls_gt120_label_dict[k] = v
+        # layer: [120，++） predict not empty
+        cls_gt120_pred_dict = {}
+        for kp, vp in zip(gt120_cls_pred_value_list, gt120_cls_pred_bbox_list):
+            cls_gt120_pred_dict[kp] = vp
+        # layer: [120，++）acc
+        for prd_cls, prd_bbox in cls_gt120_pred_dict.items():  # 遍历预测保存结果
+            for lb_cls, lb_bbox in cls_label_dict_all.items(): # 遍历标注标签  label: 0（none）, 1(单层)， 2（双层）
+                gt120_iou = calculate_iou(lb_bbox, prd_bbox)   # box1: 标注车牌框bbox坐标标签
+                if gt120_iou > pred_iou_thred:
+                    if lb_cls.split('_')[0]=="null":
+                        Correction_cls = 0
+                        if Correction_cls == int(prd_cls.split('_')[0]):
+                            gt120_cls_pred_right += 1
+                    elif ((int(lb_cls.split('_')[0]) - 1) == int(prd_cls.split('_')[0])):
+                        gt120_cls_pred_right += 1
+        # layer: [120，++）recall
+        for lb_cls, lb_bbox in cls_gt120_label_dict.items():     # 遍历标注标签
+            for prd_cls, prd_bbox in cls_pred_dict_all.items():  # 遍历预测保存结果
+                gt120_iou = calculate_iou(lb_bbox, prd_bbox)     # box1: 标注车牌框bbox坐标标签
+                if gt120_iou > pred_iou_thred:
+                    if lb_cls.split('_')[0] == "null":
+                        Correction_cls = 0
+                        if Correction_cls == int(prd_cls.split('_')[0]):
+                            gt120_cls_label_right_recall += 1
+                    elif ((int(lb_cls.split('_')[0]) - 1) == int(prd_cls.split('_')[0])):
+                        gt120_cls_label_right_recall += 1
+        # (b)bt100120:
+        #  layer:【100，120）label bbox/layer
+        cls_100_120_label_dict = {}
+        for k, v in zip(bt100and120_cls_label_value_list, bt100and120_cls_label_bbox_list):
+            cls_100_120_label_dict[k] = v
+
+        #  layer: [100，120）predict bbox/layer
+        cls_100_120_pred_dict = {}
+        for kp, vp in zip(bt100and120_cls_pred_value_list, bt100and120_cls_pred_bbox_list):
+            cls_100_120_pred_dict[kp] = vp
+        # layer: [100，120）predict acc
+        for prd_cls, prd_bbox in cls_100_120_pred_dict.items():     # 遍历预测保存结果
+            for lb_cls, lb_bbox in cls_label_dict_all.items():      # 遍历标注标签
+                bt100and120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if bt100and120_iou > pred_iou_thred:
+                    if lb_cls.split('_')[0] == "null":
+                        Correction_cls = 0
+                        if Correction_cls == int(prd_cls.split('_')[0]):
+                            bt100and120_cls_pred_right += 1
+                    elif (int(lb_cls.split('_')[0]) - 1) == int(prd_cls.split('_')[0]):
+                        bt100and120_cls_pred_right += 1
+        # layer: [100，120）label recall
+        for lb_cls, lb_bbox in cls_100_120_label_dict.items():      # 遍历标注标签
+            for prd_cls, prd_bbox in cls_pred_dict_all.items():     # 遍历预测保存结果
+                bt100and120_iou = calculate_iou(lb_bbox, prd_bbox)  # box1: 标注车牌框bbox坐标标签
+                if bt100and120_iou > pred_iou_thred:
+                    if lb_cls.split('_')[0] == "null":
+                        Correction_cls = 0
+                        if Correction_cls == int(prd_cls.split('_')[0]):
+                            bt100and120_cls_label_right_recall += 1
+                    elif (int(lb_cls.split('_')[0]) - 1) == int(prd_cls.split('_')[0]):
+                        bt100and120_cls_label_right_recall += 1
+
+
+
+    print("---------------------    predict   bbox   ---------------------------------")
+    print(f"预测框中的重叠框数量：gt120:{pred_gt_120_bbox_over}, bt100120:{pred_bt100120_bbox_over}")
+    print(f"bbox:")
+    print(f"labels_all:{all_label_bbox_list_total}, predict_all:{all_pred_box2d_total}")
+    print(f"gt120: label: {gt120_label_list_total},  pred:{gt120_bbox_pred_list_total}, pred_right: {gt120_bbox_pred_right}, label_recall:{gt120_bbox_pred_recall_right}")
+    print(f"gt120: acc:{gt120_bbox_pred_right / gt120_bbox_pred_list_total}, recall:{gt120_bbox_pred_recall_right/gt120_label_list_total}")
+    print(f"bt100120:label: {bt100and120_label_list_total}, pred:{bt100_120_bbox_pred_list_total}, pred_right:{bt100and120_pred_right}, label_recall:{bt100and120_bbox_pred_recall_right}")
+    print(f"bt100120: acc:{bt100and120_pred_right/bt100_120_bbox_pred_list_total},recall:{bt100and120_bbox_pred_recall_right/bt100and120_label_list_total}")
+
+    print("--------------------    licesnse plate char OCR --------------------------")
+    print(f"license plate OCR:")
+    print(f"labels_all:{all_label_bbox_list_total}, predict_all:{all_pred_box2d_total}")
+    print(f"gt120: labels:{gt120_char_labels_all}, pred_num:{gt120_char_pred_all},  pred_right:{gt120_char_pred_right_all}， label_recall:{gt120_char_label_recall_right_all}")
+    print(f"gt120:acc:{gt120_char_pred_right_all / gt120_char_pred_all}, recall:{gt120_char_label_recall_right_all / gt120_char_labels_all}")
+    print(f"bt100and120: labels:{bt100and120_char_labels_all}, pred_num:{bt100and120_char_pred_all},  pred_right:{bt100and120_char_pred_right_all}, label_recall:{bt100and120_char_label_recall_right_all}")
+    print(f"bt100120:acc:{bt100and120_char_pred_right_all/bt100and120_char_pred_all}, recall:{bt100and120_char_label_recall_right_all/bt100and120_char_labels_all}")
+
+    print("---------------------   predict bbox OCR all right -----------------------")
+    print(f" license plate bbox_char all right:")
+    print(f"no_empty_char_gt120_label：{no_empty_gt120_bbox_label_list_all},no_empty_char_gt120_bbox_pred:{no_empty_gt120_bbox_pred_list_all}, no_empty_char_bt100and120_bbox_label:{no_empty_bt100and120_bbox_label_list_all},no_empty_char_bt100and120_bbox_pred:{no_empty_bt100and120_bbox_pred_list_all}")
+    print(f"gt120:pred_right:{gt120_pred_ocrANDbbox_all_right},label_recall_right:{gt120_label_ocrANDbbox_all_right_recall}")
+    print(f"gt120:acc:{gt120_pred_ocrANDbbox_all_right/no_empty_gt120_bbox_pred_list_all}, recall:{gt120_label_ocrANDbbox_all_right_recall/no_empty_gt120_bbox_label_list_all}")
+    print(f"bt100120:pred_right:{bt100and120_pred_ocrANDbbox_all_right}, recall:label_recall_right:{bt100and120_label_ocrANDbbox_all_right_recall}")
+    print(f"bt100120:acc:{bt100and120_pred_ocrANDbbox_all_right/no_empty_bt100and120_bbox_pred_list_all}, recall:{bt100and120_label_ocrANDbbox_all_right_recall/no_empty_bt100and120_bbox_label_list_all}")
+
+    print("---------------------   predict  color -----------------------------------")
+    print(f"license plate color rec:")
+    print(f"all_color_label_num:{all_color_label_num}, all_color_pred_num:{all_color_pred_num}")
+    print(f"gt120:, label:{gt120_color_label_all}, pred:{gt120_color_pred_all}, pred_right:{gt120_color_pred_right}, label_recall:{gt120_color_label_right_recall}")
+    print(f"gt120:acc:{gt120_color_pred_right / gt120_color_pred_all}, recall:{gt120_color_label_right_recall / gt120_color_label_all}")
+    print(f"bt100and120:label:{bt100and120_color_label_all},pred:{bt100and120_color_pred_all},right:{bt100and120_color_pred_right}, label_recall:{bt100and120_color_pred_right_recall}")
+    print(f"bt100120:acc:{bt100and120_color_pred_right/bt100and120_color_pred_all}, recall:{bt100and120_color_pred_right_recall/bt100and120_color_label_all}")
+
+    print("--------------------    predict   cls  -----------------------------------")
+    print("layer classes:")
+    print(f"非空标签总数：{cls_label_value_list_all_num}，非空预测值总数:{cls_pred_value_list_all_num}")
+    print(f"gt120:label:{gt120_cls_label_value_list_total},pred:{gt120_cls_pred_value_list_all}, right:{gt120_cls_pred_right}, label_recall:{gt120_cls_label_right_recall}")
+    print(f"gt120:acc:{gt120_cls_pred_right / gt120_cls_pred_value_list_all}, recall:{ gt120_cls_label_right_recall/ gt120_cls_label_value_list_total}")
+    print(f"bt100120:label:{bt100and120_cls_label_value_list_total},pred:{bt100and120_cls_pred_value_list_all}, right:{bt100and120_cls_pred_right}, label_recall:{bt100and120_cls_label_right_recall}")
+    print(f"bt100120:acc:{bt100and120_cls_pred_right/bt100and120_cls_pred_value_list_all}, recall:{bt100and120_cls_label_right_recall/bt100and120_cls_label_value_list_total}")
+
+
+if __name__ == '__main__':
+
+    label_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/model_eval_data/licenseplate/V2OnlineAlignStand/jsons/Between100AND120'
+    pred_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/model_eval_data/licenseplate/V2OnlineAlignStand/runs'
+
+    calculate_bbox_det_acc_reacall_standard(label_dir, pred_dir, pred_iou_thred=0.75, char_len_thred=7)
+
