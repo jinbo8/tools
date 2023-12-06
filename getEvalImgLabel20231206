@@ -1,0 +1,81 @@
+import json
+import os
+import shutil
+
+
+def get_json(old_jsons_dir, new_gt120_dir, new_100and120_dir):
+    """
+    Args:
+        old_jsons_dir: 原始标注的json图片
+        new_gt120_dir:  满足条件的特定尺寸的图片 >120 pixel
+        new_100and120_dir: 满足条件的特定尺寸的图片 [100, 120] pixel
+    Returns:
+    """
+    GT120_NUM = 0
+    Between100AND120_NUM = 0
+    old_jsons = os.listdir(old_jsons_dir)
+    for n, old in enumerate(old_jsons):
+
+        day_time = int(old.split('-')[3])
+        if day_time > 9 and day_time < 16:  # （1）获取白天时间图片
+            old_json_file = os.path.join(old_jsons_dir, old)
+            try:
+                with open(old_json_file, 'r', encoding='utf-8') as file:
+                    json_data = json.load(file)
+                    if len(json_data) != 0:
+                        for data in json_data:
+                            lp_bbox_width = int(data['box2d'][2]) - int(data['box2d'][0])  # 计算车牌宽度
+                            # print(f"lp_bbox_width:{lp_bbox_width}")
+
+                            # (1) 车牌宽度大于120pix图片
+                            if lp_bbox_width >= 120:
+                                GT120_NUM += 1
+                                gt_120_json_path = os.path.join(new_gt120_dir, old)
+                                # print(f"GT120：{old_json_file, old_json_file}")
+                                shutil.copy(old_json_file, gt_120_json_path)
+
+                            # (2)车牌宽度介于[100,12,0] pix 图片
+                            if lp_bbox_width >= 100 and lp_bbox_width < 120:
+                                Between100AND120_NUM += 1
+                                bt100and120_json_path = os.path.join(new_100and120_dir, old)
+                                # print(f"Between100AND120：{old_json_file}")
+                                shutil.copy(old_json_file, bt100and120_json_path)
+            except json.decoder.JSONDecodeError:
+                print("empty!")
+
+    print(f"GT120_NUM:{GT120_NUM}, Between100AND120_NUM:{Between100AND120_NUM}")
+
+
+def get_stand_images(old_imgs_dir, json_dir, new_imgs_dir):
+    """
+    Args:
+        old_imgs_dir: 存储所有图片的文件夹
+        json_dir:     符合要求的json文件夹
+        new_imgs_dir: 存储符合要求的图片文件夹
+    Returns:
+    """
+    jsons = os.listdir(json_dir)
+    for n, json in enumerate(jsons):
+        print(f"process:{n}/{len(jsons)}")
+        img_name = json[:-4]+'jpg'
+        old_img_path = os.path.join(old_imgs_dir, img_name)
+        new_img_path = os.path.join(new_imgs_dir, img_name)
+        shutil.copy(old_img_path, new_img_path)
+
+
+if __name__ == '__main__':
+
+    # 基于2022年标注的车牌数据筛选符合条件的json/images
+    old_jsons_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2022年送标车牌数据53645_车牌检测模型训练/2022images_labels/json_label53645'
+    new_gt120_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2022年送标车牌数据53645_车牌检测模型训练/2022images_labels/jsonOnlineAlign/GT120'
+    new_100and120_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2022年送标车牌数据53645_车牌检测模型训练/2022images_labels/jsonOnlineAlign/Between100AND120'
+
+    # 1. 获取车牌宽度满足条件的标注标签json： GT120_NUM:2224, Between100AND120_NUM:1395
+    # get_json(old_jsons_dir, new_gt120_dir, new_100and120_dir)
+
+
+    old_imgs_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2022年送标车牌数据53645_车牌检测模型训练/2022images_labels/JPEGImages'
+    json_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2022年送标车牌数据53645_车牌检测模型训练/2022images_labels/jsonOnlineAlign/jsons/Between100AND120'
+    new_imgs_dir = '/media/dell/sata4t/jwang/datasets/items_datasets/plate_det/天翼交通标注数据集/2022年送标车牌数据53645_车牌检测模型训练/2022images_labels/jsonOnlineAlign/images/Between100AND120'
+    # 2.获取满足条件1的图片  #  Between100AND120, GT120
+    get_stand_images(old_imgs_dir, json_dir, new_imgs_dir)
