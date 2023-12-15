@@ -1,0 +1,256 @@
+import json
+import cv2
+import os
+from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+
+
+def labelDraw2Image(json_dir, img_dir, output_dir, fontPath='/home/dell/桌面/ccp-lpr_new_v3/data/字体/JDJHCU.ttf'):
+    """
+    2022 年标注的标签
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # 2022年标注规则：https://www.yuque.com/jwang-djmzc/hyl3ur/sgay1cfk2n0as4p6 蓝牌：0、绿牌：1、黄牌：2、白牌：3、黑牌：4;
+    color_value = {'0': '蓝色', '1': '绿色 ', '2': '黄色', '3': '白色', '4': '黑色', 'null':'null'}
+    # 无牌车车牌类型标注为0、单层车牌标注为1、双层车牌标注为2。
+    lp_layers = {'0': "None", '1': "single", '2': "double"}
+    # bgr：https://jingyan.baidu.com/article/c910274b23ce268c371d2d16.html
+    color = {"0": (255, 255, 187),  # blue
+             "1": (0, 128, 0),      # green
+             "2": (0, 204, 255),    # yellow
+             "3": (210, 210, 210),  # white
+             "4": (0, 0, 0),        # black
+             "null": (0, 0, 0),        # black
+
+             }
+
+    json_names = os.listdir(json_dir)
+    for i in range(len(json_names)):
+        if json_names[i].endswith("json"):
+            # load json label
+            json_path = os.path.join(json_dir, json_names[i])
+            json_file = open(json_path, encoding='utf-8')
+            marks = json.load(json_file)
+            # read image
+            img_path = img_dir + "/" + json_names[i][:-4] + "jpg"
+            img = cv2.imread(img_path)
+
+            plate_license_width = 0
+            plate_license_width_list = []
+            for j in range(len(marks)):
+                print(f" marks[j].keys():{marks[j]}")
+                # load keys and values
+                if "box2d" in marks[j].keys():
+                    box = marks[j]["box2d"]
+                if "plate_color" in marks[j].keys():
+                    plate_color = marks[j]["plate_color"]
+                if "plate_number" in marks[j].keys():
+                    plate_number = marks[j]["plate_number"]
+                if "plate_layer" in marks[j].keys():
+                    plate_layer = marks[j]["plate_layer"]
+                # 漏标注关键字段设为空 " "
+                if "type" not in marks[j].keys():
+                    type = ' '
+                if "box2d" not in marks[j].keys():
+                    box = ' '
+                if "plate_color" not in marks[j].keys():
+                    plate_color = ' '
+                if "plate_number" not in marks[j].keys():
+                    plate_number = ' '
+                if "plate_layer" not in marks[j].keys():
+                    plate_layer = ' '
+
+                # draw bbox to image
+                if len(box)==4:
+                    xmin, ymin, xmax, ymax = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+                # 符合条件车牌到图像上：绘制尺寸
+                plate_license_width = xmax - xmin
+                plate_license_width_list.append(plate_license_width)
+                # print(plate_license_width)
+                if plate_license_width >=100 and plate_license_width<120:
+                    if plate_color!='null':
+                        cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color[plate_color], thickness=2)  # 画车牌矩形框到图上
+                    # 画车牌上方填充框和字符 to image
+                    font = ImageFont.truetype(fontPath, 22)  # 20为字体大小，根据需要调整
+                    if plate_color != 'null':
+                        cv2.rectangle(img, (xmin, ymin), (xmin + 270, ymin - 30), color[plate_color], -1, cv2.LINE_AA)
+                    # if plate_number
+                    info = str(plate_license_width)+' '+str(plate_number) + ' ' + plate_layer + ' ' + color_value[plate_color]
+                    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # 图像从OpenCV格式转换成PIL格式
+                    draw = ImageDraw.Draw(img_pil)
+                    draw.text((xmin, ymin - 30), info, font=font, fill=(0, 0, 0))  # 绘制字段： 车牌字符串+层数+车牌颜色
+
+                    # 画车牌 corner point 到图上
+                    img = cv2.cvtColor(np.asarray(img_pil), cv2.COLOR_RGB2BGR)
+                    corner = marks[j]["corner"]
+                    x1, y1, x2, y2, x3, y3, x4, y4 = int(corner[0]), int(corner[1]), int(corner[2]), int(corner[3]), int(
+                        corner[4]), int(corner[5]), int(corner[6]), int(corner[7])
+                    cv2.line(img, (x1, y1), (x2, y2), (60, 20, 220), 2)
+                    cv2.line(img, (x2, y2), (x3, y3), (60, 20, 220), 2)
+                    cv2.line(img, (x3, y3), (x4, y4), (60, 20, 220), 2)
+                    cv2.line(img, (x1, y1), (x4, y4), (60, 20, 220), 2)
+                    with open(os.path.join(output_dir, json_names[i][:-4]+'txt'), 'a', encoding='utf-8') as f:
+                        f.write(
+                            info + ' ' + str(xmin) + ' ' + str(ymin) + ' ' + str(xmax) + ' ' + str(ymax) + ' ' + str(
+                                x1) + ' ' + str(y1) + ' ' + str(x2) + ' ' + str(y2) + ' ' + str(x3) + ' ' + str(
+                                y3) + ' ' + str(x4) + ' ' + str(y4) + ' '+'\n')
+
+                if plate_license_width > 120:
+                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color[plate_color], thickness=2)  # 画车牌矩形框到图上
+                    # 画车牌上方填充框和字符 to image
+                    font = ImageFont.truetype(fontPath, 22)  # 20为字体大小，根据需要调整
+                    cv2.rectangle(img, (xmin, ymin), (xmin+270, ymin-30), color[plate_color], -1, cv2.LINE_AA)
+                    info = str(plate_license_width)+' '+plate_number+' '+plate_layer+' '+color_value[plate_color]
+                    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # 图像从OpenCV格式转换成PIL格式
+                    draw = ImageDraw.Draw(img_pil)
+                    draw.text((xmin, ymin-30), info, font=font, fill=(0, 0, 0))   # 绘制字段： 车牌字符串+层数+车牌颜色
+
+                    # 画车牌 corner point 到图上
+                    img = cv2.cvtColor(np.asarray(img_pil), cv2.COLOR_RGB2BGR)
+                    corner = marks[j]["corner"]
+                    x1, y1, x2, y2, x3, y3, x4, y4 = int(corner[0]), int(corner[1]), int(corner[2]), int(corner[3]), int(corner[4]), int(corner[5]), int(corner[6]), int(corner[7])
+                    cv2.line(img, (x1, y1), (x2, y2), (60, 20, 220), 2)
+                    cv2.line(img, (x2, y2), (x3, y3), (60, 20, 220), 2)
+                    cv2.line(img, (x3, y3), (x4, y4), (60, 20, 220), 2)
+                    cv2.line(img, (x1, y1), (x4, y4), (60, 20, 220), 2)
+                    with open(os.path.join(output_dir, json_names[i][:-4] + 'txt'), 'a', encoding='utf-8') as f:
+                        f.write(
+                            info + ' ' + str(xmin) + ' ' + str(ymin) + ' ' + str(xmax) + ' ' + str(ymax) + ' ' + str(
+                                x1) + ' ' + str(y1) + ' ' + str(x2) + ' ' + str(y2) + ' ' + str(x3) + ' ' + str(
+                                y3) + ' ' + str(x4) + ' ' + str(y4) + ' ' +'\n')
+            if max(plate_license_width_list) >= 100:
+                # 绘制结果保存
+                img_output_path = output_dir + "/" + json_names[i][:-5] + ".jpg"
+                cv2.imwrite(img_output_path, img)
+
+
+def PredictDraw2Image(json_dir, img_dir, output_dir, fontPath='/home/dell/桌面/ccp-lpr_new_v3/data/字体/JDJHCU.ttf'):
+    """
+    预测结果
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # 2022年标注规则：https://www.yuque.com/jwang-djmzc/hyl3ur/sgay1cfk2n0as4p6 蓝牌：0、绿牌：1、黄牌：2、白牌：3、黑牌：4;
+    color_value = {'蓝色': 'blue', '蓝色': 'green ', '黄色': 'yellow', '白色': 'white', '黑色': 'black'}
+    # 无牌车车牌类型标注为0、单层车牌标注为1、双层车牌标注为2。
+    lp_layers = {'0': "single", '1': "double"}
+    # bgr：https://jingyan.baidu.com/article/c910274b23ce268c371d2d16.html
+    color = {"蓝色": (255, 255, 187),  # blue
+             "绿色": (0, 128, 0),  # green
+             "黄色": (0, 204, 255),  # yellow
+             "白色": (210, 210, 210),  # white
+             "黑色": (0, 0, 0),  # black
+             }
+
+    json_names = os.listdir(json_dir)
+    for i in range(len(json_names)):
+        if json_names[i].endswith("json"):
+            # load json label
+            json_path = os.path.join(json_dir, json_names[i])
+            json_file = open(json_path, encoding='utf-8')
+            marks = json.load(json_file)
+            # read image
+            img_path = img_dir + "/" + json_names[i][:-4] + "jpg"
+            img = cv2.imread(img_path)
+            print(marks)
+            plate_license_width_list = []
+            for mark in marks.values():
+                print(mark)
+                # load keys and values
+                if "box" in mark.keys():
+                    box = mark["box"]
+                if "plate_color" in mark.keys():
+                    plate_color = mark["plate_color"]
+                if "plate_char" in mark.keys():
+                    plate_char = mark["plate_char"]
+                if "plate_layer" in mark.keys():
+                    plate_layer = mark["plate_layer"]
+                # 漏标注关键字段设为空 " "
+                if "box" not in mark.keys():
+                    box = ' '
+                if "plate_color" not in mark.keys():
+                    plate_color = ' '
+                if "plate_char" not in mark.keys():
+                    plate_char = ' '
+                if "plate_layer" not in mark.keys():
+                    plate_layer = ' '
+
+                # draw bbox to image
+                if len(box) == 4:
+                    xmin, ymin, xmax, ymax = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+
+                # 符合条件车牌到图像上：绘制尺寸
+                plate_license_width = xmax - xmin
+                plate_license_width_list.append(plate_license_width)
+                if plate_license_width >=100 and plate_license_width<120:
+                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color[plate_color], thickness=2)  # 画车牌矩形框到图上
+                    # 画车牌上方填充框和字符 to image
+                    font = ImageFont.truetype(fontPath, 22)  # 20为字体大小，根据需要调整
+                    cv2.rectangle(img, (xmin, ymin), (xmin + 270, ymin - 30), color[plate_color], -1, cv2.LINE_AA)
+                    info = str(plate_license_width)+' ' + plate_char + ' ' + lp_layers[str(plate_layer)] + ' ' + ' ' + plate_color
+                    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # 图像从OpenCV格式转换成PIL格式
+                    draw = ImageDraw.Draw(img_pil)
+                    draw.text((xmin, ymin - 30), info, font=font, fill=(0, 0, 0))  # 绘制字段： 车牌字符串+层数+车牌颜色
+
+                    # 画车牌 corner point 到图上
+                    img = cv2.cvtColor(np.asarray(img_pil), cv2.COLOR_RGB2BGR)
+                    corner = mark["corners"]
+                    x1, y1, x2, y2, x3, y3, x4, y4 = int(corner[0][0]), int(corner[0][1]), int(corner[1][0]), int(corner[1][1]), int(
+                        corner[2][0]), int(corner[2][1]), int(corner[3][0]), int(corner[3][1])
+                    cv2.line(img, (x1, y1), (x2, y2), (60, 20, 220), 2)
+                    cv2.line(img, (x2, y2), (x3, y3), (60, 20, 220), 2)
+                    cv2.line(img, (x3, y3), (x4, y4), (60, 20, 220), 2)
+                    cv2.line(img, (x1, y1), (x4, y4), (60, 20, 220), 2)
+                    with open(os.path.join(output_dir, json_names[i][:-4]+'txt'), 'a', encoding='utf-8') as f:
+                        f.write(
+                            info + ' ' + str(xmin) + ' ' + str(ymin) + ' ' + str(xmax) + ' ' + str(ymax) + ' ' + str(
+                                x1) + ' ' + str(y1) + ' ' + str(x2) + ' ' + str(y2) + ' ' + str(x3) + ' ' + str(
+                                y3) + ' ' + str(x4) + ' ' + str(y4) + ' ' +'\n')
+
+                if plate_license_width>120:
+                    cv2.rectangle(img, (xmin, ymin), (xmax, ymax), color[plate_color], thickness=2)  # 画车牌矩形框到图上
+                    # 画车牌上方填充框和字符 to image
+                    font = ImageFont.truetype(fontPath, 22)  # 20为字体大小，根据需要调整
+                    cv2.rectangle(img, (xmin, ymin), (xmin + 270, ymin - 30), color[plate_color], -1, cv2.LINE_AA)
+                    info = str(plate_license_width)+' '+plate_char + ' ' + lp_layers[str(plate_layer)] + ' ' + ' ' + plate_color
+                    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # 图像从OpenCV格式转换成PIL格式
+                    draw = ImageDraw.Draw(img_pil)
+                    draw.text((xmin, ymin - 30), info, font=font, fill=(0, 0, 0))  # 绘制字段： 车牌字符串+层数+车牌颜色
+
+                    # 画车牌 corner point 到图上
+                    img = cv2.cvtColor(np.asarray(img_pil), cv2.COLOR_RGB2BGR)
+                    corner = mark["corners"]
+                    x1, y1, x2, y2, x3, y3, x4, y4 = int(corner[0][0]), int(corner[0][1]), int(corner[1][0]), int(
+                        corner[1][1]), int(
+                        corner[2][0]), int(corner[2][1]), int(corner[3][0]), int(corner[3][1])
+                    cv2.line(img, (x1, y1), (x2, y2), (60, 20, 220), 2)
+                    cv2.line(img, (x2, y2), (x3, y3), (60, 20, 220), 2)
+                    cv2.line(img, (x3, y3), (x4, y4), (60, 20, 220), 2)
+                    cv2.line(img, (x1, y1), (x4, y4), (60, 20, 220), 2)
+                    with open(os.path.join(output_dir, json_names[i][:-4]+'txt'), 'a', encoding='utf-8') as f:
+                        f.write(info+' '+str(xmin)+' '+str(ymin)+' '+str(xmax)+' '+str(ymax)+' '+ str(x1)+' '+str(y1)+' '+str(x2)+' '+str(y2)+' '+str(x3)+' '+str(y3)+' '+str(x4)+' '+str(y4) +' ' +'\n')
+
+            if max(plate_license_width_list)>=120:
+                # 绘制结果保存
+                img_output_path = output_dir + "/" + json_names[i][:-5] + ".jpg"
+                cv2.imwrite(img_output_path, img)
+
+
+if __name__ == "__main__":
+
+    img_path = "/media/dell/sata4t/jwang/datasets/items_datasets/model_eval_data/licenseplate/V2OnlineAlignStand/images/Between100AND120"
+
+    # 1.将标注结果绘制在图像上，并进行结果保存
+    # 格式：车牌宽度： 118 豫J9P395 single  蓝色 bbox(x1y1x2y2):2864 1618 2982 1660; (cornewr:x1y1x2y2x3y3x4y4): 2864 1619 2980 1620 2981 1660 2864 1658
+    json_path = "/media/dell/sata4t/jwang/datasets/items_datasets/model_eval_data/licenseplate/V2OnlineAlignStand/jsons/Between100AND120"
+    output_path = os.path.join("/home/dell/桌面/ccp-lpr_new_v3/车牌检测识别线上线下精度对齐评估/OnlineAlignStandard/imagejson/runs", json_path.split('/')[-1])
+    labelDraw2Image(json_path, img_path, output_path)
+
+    # 2.将预测结果绘制在图像上，并进行结果保存
+    # 格式：车牌宽度： 118 豫J9P395 single  蓝色 bbox(x1y1x2y2):2864 1618 2982 1660; (cornewr:x1y1x2y2x3y3x4y4): 2864 1619 2980 1620 2981 1660 2864 1658
+    pred_json_path = "/media/dell/sata4t/jwang/datasets/items_datasets/model_eval_data/licenseplate/V2OnlineAlignStand/runs1204"
+    pred_output_path = os.path.join("/home/dell/桌面/ccp-lpr_new_v3/车牌检测识别线上线下精度对齐评估/OnlineAlignStandard/imagejson/runs", pred_json_path.split('/')[-1])
+    PredictDraw2Image(pred_json_path, img_path, pred_output_path)
