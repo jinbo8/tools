@@ -3,7 +3,7 @@ from PIL import Image
 
 
 def png2jpg(png_dir, jpg_dir):
-    """ 遍历当前文件夹下的所有png文件并转换成jpg,并删除原来的png图片 """
+    """ 遍历当前文件夹下的所有png文件并转换成jpg """
     n = 0
     total = len(os.listdir(png_dir))
     for filename in os.listdir(png_dir):
@@ -14,7 +14,6 @@ def png2jpg(png_dir, jpg_dir):
         os.remove(file_img)
         img_png.save(new_img)
         print(f"{n}/{total}")
-
 
 if __name__ == '__main__':
     png_dir = '/media/dell/Elements/batch2_20880'
